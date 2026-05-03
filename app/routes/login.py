@@ -4,7 +4,7 @@ from streamlit_js_eval import set_cookie
 from grinning_cat_python_sdk import GrinningCatClient
 
 from app.env import get_env
-from app.utils import show_overlay_spinner, build_client_configuration, clear_auth_cookies, cache_cookie_me
+from app.utils import show_overlay_spinner, build_client_configuration, clear_auth_cookies, _build_me_data
 
 
 def login_page():
@@ -31,12 +31,17 @@ def login_page():
             token = token_response.access_token
 
             st.session_state["token"] = token
+            # Write the token cookie. The me cookie is intentionally NOT written
+            # here: set_cookie() is asynchronous (JS-based) and a st.rerun()
+            # fired in the same render cycle would race against it, causing the
+            # browser to receive an empty me cookie. Instead we only populate
+            # st.session_state["me"] via _build_me_data(); the me cookie will be
+            # written on the next page refresh by _get_cookie_me() in main.py,
+            # after the browser has fully committed the token cookie.
             set_cookie("token", token, duration_days=int(get_env("GRINNING_CAT_JWT_EXPIRE_MINUTES")) / (60 * 24))
+            _build_me_data()
 
-            # now, trigger /me endpoint to cache user info
-            cache_cookie_me()
-            st.toast("Login successful!", icon="✅")
-
+            st.toast("Login successful!", icon="\u2705")
             spinner_container.empty()
 
             time.sleep(1)  # Wait for a moment before rerunning

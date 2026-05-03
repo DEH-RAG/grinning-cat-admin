@@ -313,18 +313,17 @@ def _decode_agents(raw_agents: list) -> list:
     return result
 
 
-def cache_cookie_me():
+def _build_me_data() -> Dict:
+    """
+    Call /auth/me and return a normalised me_data dict.
+    Stores the result in st.session_state["me"] but does NOT write any cookie.
+    Use this at login time so that st.rerun() does not race with set_cookie.
+    """
     client = GrinningCatClient(build_client_configuration())
     res = client.auth.me(st.session_state.get("token"))
     raw = res.model_dump()
 
-    # The JWT payload uses 'sub' for the username (not 'username').
-    # 'id' does not exist at the top level; it lives inside agents[N]['user']['id'].
-    # The 'agents' field is a list of JSON strings in model_dump() output — decode them first.
     decoded_agents = _decode_agents(raw.get("agents", []))
-
-    # Normalise into a shape that the rest of the app already expects:
-    # { username, id, exp, agents: [{agent_name, user: {id, username, permissions}}] }
     first_user = decoded_agents[0].get("user", {}) if decoded_agents else {}
     me_data = {
         "username": raw.get("sub", ""),
@@ -332,15 +331,17 @@ def cache_cookie_me():
         "exp": raw.get("exp", ""),
         "agents": decoded_agents,
     }
-
-    # Store full data in session state for immediate access
     st.session_state["me"] = me_data
+    return me_data
 
-    # Write a MINIMAL cookie to avoid the 4096 B browser limit.
-    # The full me_data (agents + permissions) can exceed 4096 B and would be
-    # silently dropped by the browser, causing a fallback to API_KEY mode.
-    # On page refresh, _get_cookie_me() detects the minimal cookie and calls
-    # cache_cookie_me() again to refetch the full data from the API.
+
+def write_me_cookie(me_data: Dict):
+    """
+    Write the minimal me cookie to the browser.
+    Call this only when you are NOT about to call st.rerun() in the same
+    render cycle, otherwise the cookie write will race with the rerun and
+    the browser will receive an empty cookie.
+    """
     me_minimal = {
         "username": me_data["username"],
         "id": me_data["id"],
@@ -351,3 +352,14 @@ def cache_cookie_me():
         json.dumps(me_minimal),
         duration_days=int(get_env("GRINNING_CAT_JWT_EXPIRE_MINUTES")) / (60 * 24),
     )
+
+
+def cache_cookie_me():
+    """
+    Convenience wrapper: fetch /auth/me, store in session_state AND write the
+    minimal browser cookie.
+    Use this only on page-refresh rehydration (where no st.rerun() follows
+    immediately). At login time, call _build_me_data() instead.
+    """
+    me_data = _build_me_data()
+    write_me_cookie(me_data)
