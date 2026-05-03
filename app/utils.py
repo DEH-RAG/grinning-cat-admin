@@ -300,12 +300,21 @@ def cache_cookie_me():
     res = client.auth.me(st.session_state.get("token"))
     me_data = res.model_dump()
 
-    # Store in session state for immediate access
+    # Store full data in session state for immediate access
     st.session_state["me"] = me_data
 
-    # Also update cookie for persistence across sessions
+    # Write a MINIMAL cookie to avoid the 4096 B browser limit.
+    # The full me_data (agents + permissions) can exceed 4096 B and would be
+    # silently dropped by the browser, causing a fallback to API_KEY mode.
+    # On page refresh, _get_cookie_me() detects the minimal cookie and calls
+    # cache_cookie_me() again to refetch the full data from the API.
+    me_minimal = {
+        "username": me_data.get("username", ""),
+        "id": me_data.get("id", ""),
+        "exp": me_data.get("exp", ""),
+    }
     set_cookie(
         "me",
-        json.dumps(me_data),
+        json.dumps(me_minimal),
         duration_days=int(get_env("GRINNING_CAT_JWT_EXPIRE_MINUTES")) / (60 * 24),
     )

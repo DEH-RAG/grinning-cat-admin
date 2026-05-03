@@ -48,11 +48,27 @@ def _get_cookie_me() -> Dict | None:
 
     try:
         me = json.loads(cookie_me)
-        st.session_state["me"] = me  # Cache it
-        return me
     except json.JSONDecodeError as e:
         print(f"Error decoding 'me' cookie: {e}")
         return None
+
+    # If the cookie contains only the minimal fields (no "agents" key), it means
+    # the browser stored the lightweight version written by cache_cookie_me().
+    # Re-fetch the full data from the API so page refreshes still work correctly.
+    if "agents" not in me:
+        token = st.session_state.get("token") or get_cookie("token")
+        if token:
+            st.session_state["token"] = token
+            try:
+                from app.utils import cache_cookie_me
+                cache_cookie_me()
+                return st.session_state.get("me")
+            except Exception as e:
+                print(f"Error rehydrating me from API: {e}")
+        return None
+
+    st.session_state["me"] = me  # Cache the full object
+    return me
 
 
 def _build_agents_toggle_select(k: str, cookie_me: Dict | None):
