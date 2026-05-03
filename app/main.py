@@ -8,7 +8,6 @@ from grinning_cat_python_sdk import GrinningCatClient
 from streamlit_js_eval import get_cookie
 
 from app.constants import CHECK_INTERVAL, WELCOME_MESSAGE
-from app.env import get_env
 from app.routes.agentic_workflows import agentic_workflows_management
 from app.routes.auth_handlers import auth_handlers_management
 from app.routes.chunkers import chunkers_management
@@ -36,13 +35,14 @@ from app.routes.welcome import welcome
 
 
 def _get_cookie_me() -> Dict | None:
-    """Check if the user is logged in by credentials."""
-    # First check session state (immediate updates)
+    """Return the current user's 'me' dict from session_state or cookie."""
+    # session_state is authoritative within a Streamlit session
     if "me" in st.session_state:
         return st.session_state["me"]
 
-    # Fall back to cookie (for page refreshes/new sessions)
-    cookie_me = get_cookie("me")
+    # On a true browser page-refresh session_state is empty; try the cookie.
+    # Use a session-scoped key so Streamlit does not memoize a stale "".
+    cookie_me = get_cookie("me", component_key=f"getCookie_me_{st.session_state['_session_key']}")
     if not cookie_me:
         return None
 
@@ -52,13 +52,11 @@ def _get_cookie_me() -> Dict | None:
         print(f"Error decoding 'me' cookie: {e}")
         return None
 
-    # If the cookie contains only the minimal fields (no "agents" key), it means
-    # the browser stored the lightweight version written by cache_cookie_me().
-    # Re-fetch the full data from the API so page refreshes still work correctly.
+    # Lightweight cookie (only username/id/expiry written after the fix):
+    # re-fetch full data from the API.
     if "agents" not in me:
-        token = st.session_state.get("token") or get_cookie("token")
+        token = st.session_state.get("token")
         if token:
-            st.session_state["token"] = token
             try:
                 from app.utils import cache_cookie_me
                 cache_cookie_me()
@@ -67,7 +65,7 @@ def _get_cookie_me() -> Dict | None:
                 print(f"Error rehydrating me from API: {e}")
         return None
 
-    st.session_state["me"] = me  # Cache the full object
+    st.session_state["me"] = me
     return me
 
 
@@ -94,6 +92,7 @@ def _build_agents_toggle_select(k: str, cookie_me: Dict | None):
 
 def _apply_custom_css():
     """Apply custom CSS for enhanced styling"""
+    from app.env import get_env
     hide_dev_toolbar = """
 /* Hide the ENTIRE development toolbar */
 .stDeployButton {display: none;}
@@ -158,7 +157,7 @@ footer {visibility: hidden;}
 """, unsafe_allow_html=True)
 
 
-@st.fragment(run_every=CHECK_INTERVAL)  # Run every 5 seconds
+@st.fragment(run_every=CHECK_INTERVAL)
 def _check_status():
     """Check backend status and display it"""
     current_status = st.session_state.get("status_connection", "Warning")
@@ -181,72 +180,71 @@ def _render_sidebar_navigation(cookie_me: Dict | None):
         st.session_state["selected_page"] = None
         return
 
-    # Navigation menu with icons
     navigation_options = {
         "menu_chat": {
-            "💬 Chat": {
+            "\U0001f4ac Chat": {
                 "page": "chat",
                 "allowed": has_access("CHAT", None, cookie_me),
             },
-            "🗂️ Memory & Chats": {
+            "\U0001f5c2\ufe0f Memory & Chats": {
                 "page": "memory",
                 "allowed": has_access("MEMORY", None, cookie_me) and not is_system_agent_selected(),
             },
-            "📚 Knowledge Base": {
+            "\U0001f4da Knowledge Base": {
                 "page": "rag",
                 "allowed": has_access("UPLOAD", None, cookie_me) and not is_system_agent_selected(),
             },
         },
         "menu_users": {
-            "👥 Users": {
+            "\U0001f465 Users": {
                 "page": "users",
                 "allowed": has_access("USERS", None, cookie_me),
             },
         },
         "menu_ai": {
-            "🧬 AI Models": {
+            "\U0001f9ec AI Models": {
                 "page": "ai_models",
                 "allowed": has_access("LLM", None, cookie_me) and not is_system_agent_selected(),
             },
-            "⚡ Agentic Workflows": {
+            "\u26a1 Agentic Workflows": {
                 "page": "agentic_workflows",
                 "allowed": has_access("AGENTIC_WORKFLOW", None, cookie_me) and not is_system_agent_selected(),
             },
-            "🧠 Embedders": {
+            "\U0001f9e0 Embedders": {
                 "page": "embedders",
                 "allowed": has_access("EMBEDDER", None, cookie_me, only_admin=True),
             },
         },
         "menu_data": {
-            "🔪 Chunkers": {
+            "\U0001f52a Chunkers": {
                 "page": "chunkers",
                 "allowed": has_access("CHUNKER", None, cookie_me) and not is_system_agent_selected(),
             },
-            "👨‍💼 Context Retrievers": {
+            "\U0001f468\u200d\U0001f4bc Context Retrievers": {
                 "page": "context_retrievers",
                 "allowed": has_access("CONTEXT_RETRIEVER", None, cookie_me) and not is_system_agent_selected(),
             },
-            "🔗 Vector Databases": {
+            "\U0001f517 Vector Databases": {
                 "page": "vector_databases",
                 "allowed": has_access("VECTOR_DATABASE", None, cookie_me) and not is_system_agent_selected(),
             },
         },
         "menu_infra": {
-            "🔌 Plugins": {
+            "\U0001f50c Plugins": {
                 "page": "plugins",
                 "allowed": has_access("PLUGIN", None, cookie_me),
             },
-            "🔐 Authentication Handlers": {
+            "\U0001f510 Authentication Handlers": {
                 "page": "auth_handlers",
                 "allowed": has_access("AUTH_HANDLER", None, cookie_me) and not is_system_agent_selected(),
             },
-            "📁 File Handlers": {
+            "\U0001f4c1 File Handlers": {
                 "page": "file_handlers",
                 "allowed": has_access("FILE_MANAGER", None, cookie_me) and not is_system_agent_selected(),
             },
         },
         "menu_system": {
-            "⚙️ System": {
+            "\u2699\ufe0f System": {
                 "page": "system",
                 "allowed": (
                     has_access("CHESHIRE_CAT", None, cookie_me, only_admin=True)
@@ -256,12 +254,10 @@ def _render_sidebar_navigation(cookie_me: Dict | None):
         },
     }
 
-    # Create the navigation menu
     with st.sidebar:
-        # Custom title with styling
         st.sidebar.markdown(f"""
 <div class="nav-title">
-    💬 Current Agent: {st.session_state.get("agent_id", "N/A")}
+    \U0001f4ac Current Agent: {st.session_state.get("agent_id", "N/A")}
 </div>
 """, unsafe_allow_html=True)
 
@@ -285,102 +281,84 @@ def _render_sidebar_navigation(cookie_me: Dict | None):
                         st.session_state.pop("agent_id", None)
                         st.session_state.pop("user_id", None)
                         st.session_state.pop("conversation_id", None)
-                    st.rerun()  # Force immediate rerun
+                    st.rerun()
 
             if any(item["allowed"] for item in menu_items.values()):
-                # Add separator
                 st.divider()
 
         if st.session_state.get("agent_id") and cookie_me:
             _build_agents_toggle_select("sidebar_nav", cookie_me)
 
-        # System status section
         status_connection = st.session_state.get("status_connection", "Warning")
         st.markdown(f"""
-### 📡 System Status: <span class="status-indicator status-{status_connection.lower()}"></span> {status_connection}
+### \U0001f4e1 System Status: <span class="status-indicator status-{status_connection.lower()}"></span> {status_connection}
 """, unsafe_allow_html=True)
 
-        # Add separator
         st.divider()
 
-        if not cookie_me:
-            st.info("""You are logged in with the default API key.
-For security reasons, please consider creating admin users and logging in by credentials.""")
-
-            return
-
-        # logout button
         logout_button = st.button("Logout", type="primary", use_container_width=True)
         if logout_button:
             st.session_state.clear()
             clear_auth_cookies()
-
-            st.toast("Logged out successfully.", icon="🚪")
-            time.sleep(1)  # Wait for a moment before rerunning
-
+            st.toast("Logged out successfully.", icon="\U0001f6aa")
+            time.sleep(1)
             st.rerun()
 
 
 async def _main():
     """Main application function"""
-    # Apply custom styling
     _apply_custom_css()
-
     _check_status()
+
     if st.session_state["status_connection"] != "Online":
         st.title(WELCOME_MESSAGE)
         st.error("Grinning Cat backend is offline. Please check your connection.")
         return
 
-    # Add a flag to track if we've attempted cookie check
-    st.session_state["token"] = st.session_state.get("token", get_env("GRINNING_CAT_API_KEY"))
-    st.session_state["initial_auth_check_done"] = st.session_state.get(
-        "initial_auth_check_done", st.session_state["token"] is not None,
-    )
+    # Assign a stable per-session key used to avoid Streamlit memoizing
+    # get_cookie() results across different browser sessions.
+    if "_session_key" not in st.session_state:
+        import uuid
+        st.session_state["_session_key"] = uuid.uuid4().hex
 
-    cookie_token = st.session_state["token"]
-    if not cookie_token:
-        st.title(WELCOME_MESSAGE)
-
-        # First time: check for cookie without blocking UI
-        if not st.session_state["initial_auth_check_done"]:
-            # Mark that we've started the check
-            st.session_state["initial_auth_check_done"] = True
-
-            # Try to get cookie (async - returns None initially)
-            cookie_token = get_cookie("token")
-            if cookie_token:
-                # If we get a token immediately (rare), use it
-                st.session_state["token"] = cookie_token
-                time.sleep(1)
-                st.rerun()  # Safe rerun now that we have token
-
-            # Most common case: cookie check is async
-            # Show loading state instead of login page
-            loading_page()
-            return
-
-        # Normal flow continues after initial check
-        cookie_token = get_cookie("token")  # Try again after async result
-        if cookie_token:
-            st.session_state["token"] = cookie_token
-            time.sleep(1)
-            st.rerun()
-
-        login_page()
-
+    # If token is already in session_state this is an internal rerun (e.g.
+    # post-login): skip the async cookie cycle and go straight to the app.
+    if st.session_state.get("token"):
+        cookie_me = _get_cookie_me()
+        _render_sidebar_navigation(cookie_me)
+        await _render_page(cookie_me)
         return
 
-    cookie_me = _get_cookie_me()
+    # --- First render after a true browser page-refresh ---
+    # session_state is empty; we need to read the token cookie asynchronously.
+    st.title(WELCOME_MESSAGE)
 
-    # Render sidebar navigation and get selected page
-    _render_sidebar_navigation(cookie_me)
+    if not st.session_state.get("initial_auth_check_done"):
+        # First render: fire the async cookie read and show a loading screen.
+        st.session_state["initial_auth_check_done"] = True
+        get_cookie("token", component_key=f"getCookie_token_{st.session_state['_session_key']}")
+        loading_page()
+        return
+
+    # Second render: the iframe has responded; read the cached result.
+    cookie_token = get_cookie("token", component_key=f"getCookie_token_{st.session_state['_session_key']}")
+    if cookie_token:
+        st.session_state["token"] = cookie_token
+        time.sleep(0.5)
+        st.rerun()
+        return
+
+    # No cookie found → show login page.
+    login_page()
+
+
+async def _render_page(cookie_me: Dict | None):
+    """Dispatch to the correct page based on selected_page."""
     current_page = st.session_state["selected_page"]
 
     if current_page == "chat":
         if "messages" in st.session_state:
             st.session_state.pop("messages", None)
-
         await chat(cookie_me)
         return
 
@@ -444,7 +422,7 @@ if __name__ == "__main__":
     st.set_page_config(
         page_title="Grinning Cat Admin UI",
         layout="wide",
-        page_icon="🐱",
+        page_icon="\U0001f431",
         initial_sidebar_state="expanded",
         menu_items={
             "Get Help": "mailto:matteo.cacciola@gmail.com",

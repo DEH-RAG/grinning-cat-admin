@@ -12,7 +12,6 @@ def login_page():
 
     st.sidebar.warning("Please log in to access the admin features.")
 
-    # Render login form
     with st.form(key="login_form"):
         username = st.text_input("Username", placeholder="Enter your username")
         password = st.text_input("Password", type="password", placeholder="Enter your password")
@@ -44,11 +43,10 @@ def login_page():
             st.toast("Login successful!", icon="\u2705")
             spinner_container.empty()
 
-            time.sleep(1)  # Wait for a moment before rerunning
+            time.sleep(1)
             st.rerun()
         except Exception as e:
             clear_auth_cookies()
-
             spinner_container.empty()
             st.error(f"Error during authentication: {e}")
             return
