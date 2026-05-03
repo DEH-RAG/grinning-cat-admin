@@ -295,10 +295,43 @@ def is_system_agent_selected() -> bool:
     return st.session_state.get("agent_id") == DEFAULT_SYSTEM_KEY
 
 
+def _decode_agents(raw_agents: list) -> list:
+    """
+    Decode the agents list from the JWT response.
+    Each element may be either a dict (already decoded) or a JSON string
+    (as returned by model_dump() on the SDK's JWTPayload model).
+    """
+    result = []
+    for item in raw_agents:
+        if isinstance(item, str):
+            try:
+                result.append(json.loads(item))
+            except json.JSONDecodeError:
+                pass
+        elif isinstance(item, dict):
+            result.append(item)
+    return result
+
+
 def cache_cookie_me():
     client = GrinningCatClient(build_client_configuration())
     res = client.auth.me(st.session_state.get("token"))
-    me_data = res.model_dump()
+    raw = res.model_dump()
+
+    # The JWT payload uses 'sub' for the username (not 'username').
+    # 'id' does not exist at the top level; it lives inside agents[N]['user']['id'].
+    # The 'agents' field is a list of JSON strings in model_dump() output — decode them first.
+    decoded_agents = _decode_agents(raw.get("agents", []))
+
+    # Normalise into a shape that the rest of the app already expects:
+    # { username, id, exp, agents: [{agent_name, user: {id, username, permissions}}] }
+    first_user = decoded_agents[0].get("user", {}) if decoded_agents else {}
+    me_data = {
+        "username": raw.get("sub", ""),
+        "id": first_user.get("id", ""),
+        "exp": raw.get("exp", ""),
+        "agents": decoded_agents,
+    }
 
     # Store full data in session state for immediate access
     st.session_state["me"] = me_data
@@ -309,9 +342,9 @@ def cache_cookie_me():
     # On page refresh, _get_cookie_me() detects the minimal cookie and calls
     # cache_cookie_me() again to refetch the full data from the API.
     me_minimal = {
-        "username": me_data.get("username", ""),
-        "id": me_data.get("id", ""),
-        "exp": me_data.get("exp", ""),
+        "username": me_data["username"],
+        "id": me_data["id"],
+        "exp": me_data["exp"],
     }
     set_cookie(
         "me",
